@@ -1,0 +1,27 @@
+# ── 数据文件（绝不提交，保护数据隐私）────────────────────────────
+data/
+football.db
+football.db-shm
+football.db-wal
+analysis/
+*.parquet
+persons_*.json
+nations_*.json
+clubs_*.json
+*.npy
+*.csv
+high_potential_players.csv
+
+# ── Python ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# ── IDE ───────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
