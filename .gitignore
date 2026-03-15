@@ -1,6 +1,5 @@
 # ── 数据文件（绝不提交，保护数据隐私）────────────────────────────
 data/
-football.db
 football.db-shm
 football.db-wal
 analysis/
