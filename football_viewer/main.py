@@ -13,7 +13,7 @@ from pathlib import Path
 # 确保能找到同目录的模块
 sys.path.insert(0, str(Path(__file__).parent))
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget, QSplashScreen, QLabel, QMessageBox
+from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget, QSplashScreen, QLabel, QMessageBox, QPushButton
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 
@@ -34,9 +34,11 @@ def _global_except_hook(exc_type, exc_value, exc_tb):
 
 sys.excepthook = _global_except_hook
 
+import i18n
 from data_loader import loader
 from list_page import ListPage
 from detail_page import DetailPage
+from club_page import ClubPage
 
 
 # ── 后台加载线程 ──────────────────────────────────────────────────
@@ -61,13 +63,29 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self._stack)
 
         # 加载中占位页
-        loading = QLabel("正在加载球员数据，请稍候…")
-        loading.setAlignment(Qt.AlignCenter)
-        loading.setFont(QFont("Arial", 16))
-        self._stack.addWidget(loading)   # index 0
+        self._loading_lbl = QLabel(i18n.t("正在加载球员数据，请稍候…"))
+        self._loading_lbl.setAlignment(Qt.AlignCenter)
+        self._loading_lbl.setFont(QFont("Arial", 16))
+        self._stack.addWidget(self._loading_lbl)   # index 0
 
-        self._list_page: ListPage | None = None
+        # 语言切换按钮（状态栏）
+        self._lang_btn = QPushButton("EN")
+        self._lang_btn.setFixedWidth(42)
+        self._lang_btn.setStyleSheet("""
+            QPushButton {
+                font-size: 12px; font-weight: bold;
+                border: 1px solid #aaa; border-radius: 4px;
+                padding: 2px 6px; background: #f5f5f5;
+            }
+            QPushButton:hover { background: #e0e0e0; }
+        """)
+        self._lang_btn.clicked.connect(self._toggle_lang)
+        self.statusBar().addPermanentWidget(self._lang_btn)
+        self.statusBar().setStyleSheet("QStatusBar { font-size: 12px; }")
+
+        self._list_page:   ListPage   | None = None
         self._detail_page: DetailPage | None = None
+        self._club_page:   ClubPage   | None = None
 
         # 后台读取 CSV
         self._loader_thread = LoadThread()
@@ -78,12 +96,17 @@ class MainWindow(QMainWindow):
         try:
             self._list_page   = ListPage()
             self._detail_page = DetailPage()
+            self._club_page   = ClubPage()
 
             self._stack.addWidget(self._list_page)    # index 1
             self._stack.addWidget(self._detail_page)  # index 2
+            self._stack.addWidget(self._club_page)    # index 3
 
             self._list_page.player_selected.connect(self._show_detail)
             self._detail_page.back_requested.connect(self._show_list)
+            self._detail_page.club_selected.connect(self._show_club)
+            self._club_page.back_requested.connect(self._show_detail_from_club)
+            self._club_page.player_selected.connect(self._show_detail)
 
             self._stack.setCurrentIndex(1)
         except Exception:
@@ -95,6 +118,18 @@ class MainWindow(QMainWindow):
 
     def _show_list(self):
         self._stack.setCurrentWidget(self._list_page)
+
+    def _show_club(self, club_id: int, club_name: str):
+        self._club_page.load_club(club_id, club_name)
+        self._stack.setCurrentWidget(self._club_page)
+
+    def _toggle_lang(self):
+        i18n.toggle()
+        self._lang_btn.setText("中" if i18n.get_lang() == "en" else "EN")
+        self._loading_lbl.setText(i18n.t("正在加载球员数据，请稍候…"))
+
+    def _show_detail_from_club(self):
+        self._stack.setCurrentWidget(self._detail_page)
 
 
 # ── 入口 ──────────────────────────────────────────────────────────

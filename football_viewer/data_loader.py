@@ -7,11 +7,14 @@ import sqlite3
 from pathlib import Path
 from datetime import date
 
+import i18n
+
 if getattr(sys, "frozen", False):
-    # PyInstaller 打包模式：football.db 与可执行文件同目录
-    DB_PATH = Path(sys._MEIPASS) / "football.db"
+    DB_PATH   = Path(sys._MEIPASS) / "football.db"
+    META_PATH = Path(sys._MEIPASS) / "meta.db"
 else:
-    DB_PATH = Path(__file__).parent.parent / "football.db"
+    DB_PATH   = Path(__file__).parent.parent / "football.db"
+    META_PATH = Path(__file__).parent.parent / "meta.db"
 
 # ── 可用快照 ──────────────────────────────────────────────────────
 SNAPSHOTS        = ["24", "25", "26"]
@@ -85,16 +88,55 @@ _POS_COLS = ", ".join(f"ps.pm_{i}" for i in range(15))
 class DataLoader:
     def __init__(self):
         self._conn: sqlite3.Connection | None = None
+        self._meta: sqlite3.Connection | None = None
+        self._club_cache:   dict[int, str] = {}
+        self._nation_cache: dict[int, str] = {}
 
     def load(self) -> None:
         self._conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        if META_PATH.exists():
+            self._meta = sqlite3.connect(META_PATH, check_same_thread=False)
+            self._meta.row_factory = sqlite3.Row
+            for row in self._meta.execute("SELECT id, name FROM clubs"):
+                self._club_cache[row["id"]] = row["name"]
+            for row in self._meta.execute("SELECT id, name FROM nations"):
+                self._nation_cache[row["id"]] = row["name"]
 
     @property
     def conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self.load()
         return self._conn
+
+    def club_name(self, club_id) -> str:
+        try:
+            return self._club_cache.get(int(club_id), "") or ""
+        except (TypeError, ValueError):
+            return ""
+
+    def nation_name(self, nation_id) -> str:
+        try:
+            return self._nation_cache.get(int(nation_id), "") or ""
+        except (TypeError, ValueError):
+            return ""
+
+    def get_club_players(self, club_id: int, snapshot: str = DEFAULT_SNAPSHOT) -> list[dict]:
+        """返回指定俱乐部在某快照的所有球员。"""
+        sql = f"""
+            SELECT pi.id, pi.first_name, pi.last_name, pi.birth_date, pi.height,
+                   ps.ability_now, ps.ability_potential,
+                   ps24.ability_now       AS ability_now_24,
+                   ps24.ability_potential AS ability_potential_24,
+                   {_POS_COLS}
+            FROM player_info pi
+            JOIN player_snapshot ps ON pi.id = ps.id AND ps.snapshot = ?
+            LEFT JOIN player_snapshot ps24 ON pi.id = ps24.id AND ps24.snapshot = '24'
+            WHERE ps.club_id = ?
+            ORDER BY COALESCE(ps.ability_potential, 0) DESC
+        """
+        rows = self.conn.execute(sql, (snapshot, club_id)).fetchall()
+        return [dict(r) for r in rows]
 
     def search(self, query: str, snapshot: str = DEFAULT_SNAPSHOT) -> list[dict]:
         """按姓名（大小写不敏感）过滤，返回列表页所需字段。"""
@@ -142,6 +184,35 @@ class DataLoader:
 
     # ── 静态工具方法 ─────────────────────────────────────────────
 
+    def get_club_players_full(self, club_id: int, snapshot: str = DEFAULT_SNAPSHOT) -> list[dict]:
+        """返回俱乐部球员的完整属性（含所有 pm_/ph_ 列），用于推荐算法。"""
+        pm_cols = ", ".join(f"ps.pm_{i}" for i in range(69))
+        ph_cols = ", ".join(f"ps.ph_{i}" for i in range(8))
+        sql = f"""
+            SELECT pi.id, pi.first_name, pi.last_name, pi.birth_date, pi.height, pi.weight,
+                   ps.ability_now, ps.ability_potential, {pm_cols}, {ph_cols}
+            FROM player_snapshot ps
+            JOIN player_info pi ON pi.id = ps.id
+            WHERE ps.snapshot = ? AND ps.club_id = ?
+        """
+        rows = self.conn.execute(sql, (snapshot, club_id)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_candidates(self, exclude_club_id: int, snapshot: str = DEFAULT_SNAPSHOT,
+                       min_ability: int = 100) -> list[dict]:
+        """返回候选引援球员（排除指定俱乐部，带能力下限），用于推荐算法。"""
+        pm_cols = ", ".join(f"ps.pm_{i}" for i in range(69))
+        ph_cols = ", ".join(f"ps.ph_{i}" for i in range(8))
+        sql = f"""
+            SELECT pi.id, pi.first_name, pi.last_name, pi.birth_date, pi.height, pi.weight,
+                   ps.ability_now, ps.ability_potential, {pm_cols}, {ph_cols}
+            FROM player_snapshot ps
+            JOIN player_info pi ON pi.id = ps.id
+            WHERE ps.snapshot = ? AND ps.club_id != ? AND ps.ability_now >= ?
+        """
+        rows = self.conn.execute(sql, (snapshot, exclude_club_id, min_ability)).fetchall()
+        return [dict(r) for r in rows]
+
     @staticmethod
     def calc_age(birth_date_str: str) -> str:
         try:
@@ -159,7 +230,7 @@ class DataLoader:
         for idx, name in POSITIONS.items():
             val = row.get(f"pm_{idx}") or 0
             if val >= 5:
-                result.append((idx, name, int(val)))
+                result.append((idx, i18n.pos_t(name), int(val)))
         result.sort(key=lambda x: -x[2])
         return result
 
@@ -167,7 +238,7 @@ class DataLoader:
     def get_attrs(row: dict, attr_dict: dict) -> list[tuple[str, int]]:
         """返回指定属性字典对应的 [(属性名, 值), ...] 列表。"""
         return [
-            (name, int(row.get(f"pm_{idx}") or 0))
+            (i18n.attr_t(idx, name), int(row.get(f"pm_{idx}") or 0))
             for idx, name in attr_dict.items()
         ]
 
@@ -175,7 +246,7 @@ class DataLoader:
     def get_hidden_attrs(row: dict) -> list[tuple[str, int]]:
         """返回隐藏属性列表。"""
         return [
-            (name, int(row.get(f"ph_{idx}") or 0))
+            (i18n.hidden_t(idx, name), int(row.get(f"ph_{idx}") or 0))
             for idx, name in HIDDEN.items()
         ]
 
@@ -183,11 +254,11 @@ class DataLoader:
     def get_personality_attrs(row: dict) -> list[tuple[str, int]]:
         """返回性格属性列表（隐藏属性 + 性格相关主属性）。"""
         result = [
-            (name, int(row.get(f"ph_{idx}") or 0))
+            (i18n.hidden_t(idx, name), int(row.get(f"ph_{idx}") or 0))
             for idx, name in HIDDEN.items()
         ]
         result += [
-            (name, int(row.get(f"pm_{idx}") or 0))
+            (i18n.attr_t(idx, name), int(row.get(f"pm_{idx}") or 0))
             for idx, name in PERSONALITY_MAIN.items()
         ]
         return result
@@ -196,7 +267,7 @@ class DataLoader:
     def main_positions_str(row: dict) -> str:
         """列表页：主要位置字符串（评分 ≥ 15），最多 3 个。"""
         positions = [
-            name
+            i18n.pos_t(name)
             for idx, name in POSITIONS.items()
             if int(row.get(f"pm_{idx}") or 0) >= 15
         ]

@@ -8,6 +8,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('football.db', '.'),
+        ('meta.db', '.'),
     ],
     hiddenimports=[
         'PyQt5.QtCore',

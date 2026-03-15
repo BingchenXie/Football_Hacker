@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont, QColor, QPainter, QPen, QBrush
 
 from data_loader import loader, ATTRIBUTE_GROUPS, POSITIONS, SNAPSHOTS
+import i18n
 
 
 # ── 属性条 ────────────────────────────────────────────────────────
@@ -268,7 +269,7 @@ class PositionGroup(QGroupBox):
     """
 
     def __init__(self, positions: list[tuple[int, str, int]], parent=None):
-        super().__init__("位置评分", parent)
+        super().__init__(i18n.t("位置评分"), parent)
         self.setStyleSheet(self._GRP_STYLE)
         row = QHBoxLayout(self)
         row.setContentsMargins(8, 16, 8, 8)
@@ -308,6 +309,7 @@ class PositionGroup(QGroupBox):
 
 class DetailPage(QWidget):
     back_requested = pyqtSignal()
+    club_selected  = pyqtSignal(int, str)   # (club_id, club_name)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -315,6 +317,7 @@ class DetailPage(QWidget):
         self._player_id: int | None = None
         self._snap_btns: dict[str, QPushButton] = {}
         self._build_skeleton()
+        i18n.register(self.retranslate_ui)
 
     def _build_skeleton(self):
         outer = QVBoxLayout(self)
@@ -328,8 +331,8 @@ class DetailPage(QWidget):
         tb_layout = QHBoxLayout(toolbar)
         tb_layout.setContentsMargins(16, 0, 16, 0)
 
-        back_btn = QPushButton("← 返回列表")
-        back_btn.setStyleSheet("""
+        self._back_btn = QPushButton(i18n.t("← 返回列表"))
+        self._back_btn.setStyleSheet("""
             QPushButton {
                 color: white; background: transparent;
                 border: 1px solid #aaa; border-radius: 4px;
@@ -337,14 +340,14 @@ class DetailPage(QWidget):
             }
             QPushButton:hover { background: #34495e; }
         """)
-        back_btn.clicked.connect(self.back_requested)
+        self._back_btn.clicked.connect(self.back_requested)
 
         self._title_lbl = QLabel()
         self._title_lbl.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
 
         # 快照切换按钮（24 / 25 / 26）
-        snap_label = QLabel("赛季：")
-        snap_label.setStyleSheet("color: #aaa; font-size: 12px;")
+        self._snap_label = QLabel(i18n.t("赛季："))
+        self._snap_label.setStyleSheet("color: #aaa; font-size: 12px;")
 
         btn_style = """
             QPushButton { color: #ccc; background: #34495e; border: none;
@@ -353,7 +356,7 @@ class DetailPage(QWidget):
             QPushButton:hover   { background: #2980b9; color: white; }
         """
         for snap in SNAPSHOTS:
-            btn = QPushButton(f"FM{snap}")
+            btn = QPushButton(f"20{snap}")
             btn.setCheckable(True)
             btn.setFixedWidth(52)
             btn.setStyleSheet(btn_style)
@@ -362,11 +365,11 @@ class DetailPage(QWidget):
 
         self._snap_btns[self._snapshot].setChecked(True)
 
-        tb_layout.addWidget(back_btn)
+        tb_layout.addWidget(self._back_btn)
         tb_layout.addSpacing(16)
         tb_layout.addWidget(self._title_lbl)
         tb_layout.addStretch()
-        tb_layout.addWidget(snap_label)
+        tb_layout.addWidget(self._snap_label)
         for btn in self._snap_btns.values():
             tb_layout.addWidget(btn)
         outer.addWidget(toolbar)
@@ -385,11 +388,20 @@ class DetailPage(QWidget):
         outer.addWidget(scroll)
 
     def _clear_content(self):
-        layout = self._content_layout
-        while layout.count():
-            item = layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        def _clear_layout(lo):
+            while lo.count():
+                item = lo.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+                elif item.layout():
+                    _clear_layout(item.layout())
+        _clear_layout(self._content_layout)
+
+    def retranslate_ui(self):
+        self._back_btn.setText(i18n.t("← 返回列表"))
+        self._snap_label.setText(i18n.t("赛季："))
+        if self._player_id is not None:
+            self._render()
 
     def load_player(self, player_id: int):
         self._player_id = player_id
@@ -447,24 +459,61 @@ class DetailPage(QWidget):
             return val
 
         # ── 基本信息 ────────────────────────────────────────────
-        layout.addWidget(InfoCard("基本信息", [
-            ("姓名",       name),
-            ("出生日期",   safe("birth_date")),
-            ("年龄",       loader.calc_age(safe("birth_date"))),
-            ("身高",       f"{safe('height')} cm"),
-            ("国籍ID",     safe("nation_id")),
-            ("球衣号",     safe("play_number")),
-            ("薪资（/周）", safe_salary()),
-            ("ID",         str(row.get("id", "—"))),
+        nation_disp = loader.nation_name(row.get("nation_id")) or safe("nation_id")
+        club_id     = row.get("club_id")
+        club_disp   = loader.club_name(club_id) or "—"
+        layout.addWidget(InfoCard(i18n.t("基本信息"), [
+            (i18n.t("姓名"),       name),
+            (i18n.t("出生日期"),   safe("birth_date")),
+            (i18n.t("年龄"),       loader.calc_age(safe("birth_date"))),
+            (i18n.t("身高"),       f"{safe('height')} cm"),
+            (i18n.t("国籍"),       nation_disp),
+            (i18n.t("球衣号"),     safe("play_number")),
+            (i18n.t("薪资（/周）"), safe_salary()),
         ]))
+
+        # ── 所属球队（可点击）────────────────────────────────────
+        club_row = QHBoxLayout()
+        club_row.setContentsMargins(4, 0, 4, 0)
+        club_lbl = QLabel(i18n.t("所属球队："))
+        club_lbl.setStyleSheet("color: #888; font-size: 12px;")
+        if club_id and club_disp != "—":
+            club_btn = QPushButton(club_disp)
+            club_btn.setFlat(True)
+            club_btn.setCursor(Qt.PointingHandCursor)
+            club_btn.setStyleSheet("""
+                QPushButton {
+                    color: #3498db; font-size: 13px; font-weight: bold;
+                    border: none; background: transparent;
+                    text-align: left; padding: 0;
+                }
+                QPushButton:hover { color: #2980b9; text-decoration: underline; }
+            """)
+            club_btn.clicked.connect(lambda _, cid=int(club_id), cn=club_disp:
+                                     self.club_selected.emit(cid, cn))
+            club_row.addWidget(club_lbl)
+            club_row.addWidget(club_btn)
+        else:
+            club_row.addWidget(club_lbl)
+            club_row.addWidget(QLabel("—"))
+        club_row.addStretch()
+        layout.addLayout(club_row)
 
         # ── 能力值 ──────────────────────────────────────────────
         prev_label = ""
         if snap in SNAPSHOTS and SNAPSHOTS.index(snap) > 0:
-            prev_label = f" · △为FM{SNAPSHOTS[SNAPSHOTS.index(snap)-1]}→FM{snap}变化"
-        layout.addWidget(InfoCard(f"能力值（当前快照{prev_label}）", [
-            ("当前能力", ability_with_change("ability_now")),
-            ("潜力上限", ability_with_change("ability_potential")),
+            prev = SNAPSHOTS[SNAPSHOTS.index(snap) - 1]
+            if i18n.get_lang() == "zh":
+                prev_label = f" · △为20{prev}→20{snap}变化"
+            else:
+                prev_label = f" · △ 20{prev}→20{snap}"
+        if i18n.get_lang() == "zh":
+            ability_title = f"能力值（当前快照{prev_label}）"
+        else:
+            ability_title = f"Ability (Snapshot{prev_label})"
+        layout.addWidget(InfoCard(ability_title, [
+            (i18n.t("当前能力"), ability_with_change("ability_now")),
+            (i18n.t("潜力上限"), ability_with_change("ability_potential")),
         ]))
 
         # ── 位置 ────────────────────────────────────────────────
@@ -474,10 +523,10 @@ class DetailPage(QWidget):
         # ── 技术属性各组 ────────────────────────────────────────
         for group_title, attr_dict in ATTRIBUTE_GROUPS:
             attrs = loader.get_attrs(row, attr_dict)
-            layout.addWidget(AttributeGroup(group_title, attrs))
+            layout.addWidget(AttributeGroup(i18n.t(group_title), attrs))
 
         # ── 性格属性 ────────────────────────────────────────────
         personality_attrs = loader.get_personality_attrs(row)
-        layout.addWidget(AttributeGroup("性格", personality_attrs))
+        layout.addWidget(AttributeGroup(i18n.t("性格"), personality_attrs))
 
         layout.addStretch()

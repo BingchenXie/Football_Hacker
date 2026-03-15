@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont, QColor
 
 from data_loader import loader, DataLoader
+import i18n
 
 
 # ── 列定义 ────────────────────────────────────────────────────────
@@ -138,7 +139,7 @@ class PlayerTableModel(QAbstractTableModel):
 
     def headerData(self, section: int, orientation, role=Qt.DisplayRole):
         if role == Qt.DisplayRole and orientation == Qt.Horizontal:
-            return COLUMNS[section][0]
+            return i18n.t(COLUMNS[section][0])
         return None
 
 
@@ -150,33 +151,35 @@ class ListPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._model = PlayerTableModel()
+        self._last_count = 0
         self._build_ui()
         self._load_data("")
+        i18n.register(self.retranslate_ui)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        title = QLabel("⚽ Football Hacker — 球员数据库")
-        title.setFont(QFont("Arial", 18, QFont.Bold))
-        layout.addWidget(title)
+        self._title_lbl = QLabel(i18n.t("⚽ Football Hacker — 球员数据库"))
+        self._title_lbl.setFont(QFont("Arial", 18, QFont.Bold))
+        layout.addWidget(self._title_lbl)
 
         # ── 搜索栏 ────────────────────────────────────────────────
         search_row = QHBoxLayout()
 
         self._search = QLineEdit()
-        self._search.setPlaceholderText("输入球员姓名后按回车或点击搜索…")
+        self._search.setPlaceholderText(i18n.t("输入球员姓名后按回车或点击搜索…"))
         self._search.setFixedHeight(36)
         self._search.setStyleSheet(
             "QLineEdit { font-size: 14px; padding: 4px 8px; border-radius: 6px; }"
         )
         self._search.returnPressed.connect(self._on_search)
 
-        search_btn = QPushButton("搜索")
-        search_btn.setFixedHeight(36)
-        search_btn.setFixedWidth(72)
-        search_btn.setStyleSheet("""
+        self._search_btn = QPushButton(i18n.t("搜索"))
+        self._search_btn.setFixedHeight(36)
+        self._search_btn.setFixedWidth(72)
+        self._search_btn.setStyleSheet("""
             QPushButton {
                 font-size: 14px; border-radius: 6px;
                 background: #3498db; color: white; border: none;
@@ -184,13 +187,13 @@ class ListPage(QWidget):
             QPushButton:hover { background: #2980b9; }
             QPushButton:pressed { background: #2471a3; }
         """)
-        search_btn.clicked.connect(self._on_search)
+        self._search_btn.clicked.connect(self._on_search)
 
         self._count_label = QLabel()
         self._count_label.setStyleSheet("color: gray; font-size: 13px;")
 
         search_row.addWidget(self._search)
-        search_row.addWidget(search_btn)
+        search_row.addWidget(self._search_btn)
         search_row.addWidget(self._count_label)
         layout.addLayout(search_row)
 
@@ -222,15 +225,33 @@ class ListPage(QWidget):
         self._table.doubleClicked.connect(self._on_double_click)
         layout.addWidget(self._table)
 
-        hint = QLabel("双击行查看球员详情  ·  点击表头排序")
-        hint.setStyleSheet("color: gray; font-size: 12px;")
-        layout.addWidget(hint)
+        self._hint_lbl = QLabel(i18n.t("双击行查看球员详情  ·  点击表头排序"))
+        self._hint_lbl.setStyleSheet("color: gray; font-size: 12px;")
+        layout.addWidget(self._hint_lbl)
+
+    def retranslate_ui(self):
+        self._title_lbl.setText(i18n.t("⚽ Football Hacker — 球员数据库"))
+        self._search.setPlaceholderText(i18n.t("输入球员姓名后按回车或点击搜索…"))
+        self._search_btn.setText(i18n.t("搜索"))
+        self._hint_lbl.setText(i18n.t("双击行查看球员详情  ·  点击表头排序"))
+        self._update_count(self._last_count)
+        self._model.headerDataChanged.emit(Qt.Horizontal, 0, len(COLUMNS) - 1)
+        # 刷新位置列（用翻译后的位置名重新生成缓存）
+        self._model._apply_sort()
+        self._model.layoutChanged.emit()
 
     def _load_data(self, query: str):
-        self._count_label.setText("加载中…")
+        self._count_label.setText(i18n.t("加载中…"))
         rows = loader.search(query)
         self._model.set_data(rows)
-        self._count_label.setText(f"共 {len(rows):,} 名球员")
+        self._update_count(len(rows))
+
+    def _update_count(self, n: int):
+        self._last_count = n
+        if i18n.get_lang() == "zh":
+            self._count_label.setText(f"共 {n:,} 名球员")
+        else:
+            self._count_label.setText(f"{n:,} players")
 
     def _on_search(self):
         self._load_data(self._search.text())
