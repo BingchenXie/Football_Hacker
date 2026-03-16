@@ -7,7 +7,7 @@
 
 ## Background
 
-Football Hacker started as a **fan-facing player database browser** built for the football simulation community. The Chinese edition quickly became popular, accumulating about **9,000 active users**:
+Football Hacker started as a **fan-facing player database browser** built for the football simulation community. The Chinese edition quickly became popular, accumulating about **9,000 registered users**:
 
 <img src="doc/users.png" width="420"/>
 
